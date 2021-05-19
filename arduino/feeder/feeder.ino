@@ -1,7 +1,5 @@
 /*
 
-aggiungere sensore feedback chiusura coperchio
-
 Circuit:
  * LCD RS pin to digital pin 12
  * LCD Enable pin to digital pin 13
@@ -57,6 +55,7 @@ char infoScreen2[17];
 // initialize the library with the numbers of the interface pins
 LiquidCrystal lcd(12, 13, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 SoftwareSerial EEBlue(A0, A1); // RX | TX
+Scheduler r1;
 
 int lightDisplay = HIGH;
 int displayStatus = HIGH;
@@ -67,36 +66,44 @@ void stringToBlue(String str) {
     EEBlue.write(str[i]);
   }
 }
-Task displayOffTask(0, -1, []() {
+Task displayOffTask(0, TASK_ONCE, []() {
   digitalWrite(LCD_ANODE,LOW);
   displayStatus = LOW;
 });
-Task restoreDisplayInfoTask(0,-1, []() {
+Task restoreDisplayInfoTask(0,TASK_ONCE, []() {
   lcd.setCursor(0,0);
   lcd.write(infoScreen1);
   lcd.setCursor(0,1);
   lcd.write(infoScreen2);
 });
-Task closeTask(0, -1, []() {
+Task closeTask(0, TASK_ONCE, []() {
   //close();
   Serial.println("CLOSE TASK CALLED");
   slowClose();
+  restoreInfoScreen();
 });
-boolean alreadyOpened = false;
+Task openTask(0, TASK_ONCE, []() {
+  Serial.println("OPEN TASK CALLED");
+  open();
+  restoreInfoScreen();
+});
+/*
+STATI APERTURA:
+0 => chiuso
+1 => aperto
+2 => in apertura
+3 => in chiusura
+*/
+
+int openState = 0;
 //===[TASK CHE CONTROLLA UNA VOLTA AL MINUTO SE E' L'ORARIO DI APRIRE IL COPERCHIO]===//
 Task checkTimeTask(59000, TASK_FOREVER, []() {
   Serial.println(hour() + ":" + String(minute()) +" == " + orario_apertura.hours + ":" + orario_apertura.minutes);
-  if(!alreadyOpened && hour() == orario_apertura.hours && minute() == orario_apertura.minutes){
+  if(openState == 0 && hour() == orario_apertura.hours && minute() == orario_apertura.minutes){
     Serial.println("opening");
     open();
-    alreadyOpened = true;
-  } else {
-    alreadyOpened = false;
   }
 });
-
-
-//aggiungere bottone per chiusura
 
 /*
 COMANDI DISPONIBILI:
@@ -189,8 +196,6 @@ Task bluetoothSerialTask(1000, TASK_FOREVER, []() {
   }
   //if(command.length() > 0) Serial.println(command);
   
-  
-  
   while (Serial.available()) EEBlue.write(Serial.read());
   //Serial.println("Ended bluetooth check for data");
 });
@@ -208,28 +213,35 @@ void btnDisplayPressed() {
 long lastTimeBtnClosePressed = 0;
 void btnClosePressed() {
   Serial.println("BTN CLOSE PRESSED");
+  Serial.println(openState);
   if(millis() - lastTimeBtnClosePressed > 1000) {
-    if(alreadyOpened) {
+    Serial.println("executing");
+    lastTimeBtnClosePressed = millis();
+    if(openState == 1) {
       lcd.setCursor(0,0);
       lcd.write("    CHIUSURA    ");
       lcd.setCursor(0,1);
       lcd.write("    IN CORSO    ");
       //don't close here because of interrupt short amount of time dedicated!!!!!!!!!
-      closeTask.disable(); //eventually already started task.
-      closeTask.enableDelayed(1 * TASK_SECOND);
-      alreadyOpened = false;
-    } else {
+      openState = 3;
+      r1.addTask(closeTask);
+      closeTask.restartDelayed(1 * TASK_SECOND); //use this instead of closeTask.enableDelayed(1 * TASK_SECOND);
+      
+    } else if(openState == 0) {
       lcd.setCursor(0,0);
-      lcd.write("    CIOTOLA     ");
+      lcd.write("    APERTURA    ");
       lcd.setCursor(0,1);
-      lcd.write("   GIA CHIUSA   ");
+      lcd.write("    IN CORSO    ");
+      openState = 2;
+      r1.addTask(openTask);
+      openTask.restartDelayed(1 * TASK_SECOND);
     }
-    restoreDisplayInfoTask.disable();
-    restoreDisplayInfoTask.enableDelayed(6 * TASK_SECOND);
-    lastTimeBtnClosePressed = millis();
   }
 }
-Scheduler r1;
+void restoreInfoScreen() {
+  r1.addTask(restoreDisplayInfoTask);
+  restoreDisplayInfoTask.restart();
+}
 void setup()
 {
   Serial.begin(9600);
@@ -250,8 +262,6 @@ void setup()
   r1.addTask(displayOffTask);
   r1.addTask(bluetoothSerialTask);
   r1.addTask(checkTimeTask);
-  r1.addTask(restoreDisplayInfoTask);
-  r1.addTask(closeTask);
   attachInterrupt(digitalPinToInterrupt(DISPLAY_BTN), btnDisplayPressed, FALLING); //WITH FALLING instead of RISING(+ time check) i avoid bouncing effect on release because the interrupt is called only on release and not on press
   attachInterrupt(digitalPinToInterrupt(CLOSE_BTN), btnClosePressed, FALLING);
   
@@ -269,8 +279,6 @@ void setup()
   displayOffTask.enableDelayed(15 * TASK_SECOND); //spegni dopo primi 15secondi
 
   checkTimeTask.enable();
-  //open();
-  //open();
   //slowClose();
 }
 void loop()
@@ -287,28 +295,29 @@ void loop()
   //digitalWrite(LCD_ANODE,buttonStatus);
   lightDisplay = !lightDisplay;*/
   r1.execute();
-  //Serial.println(digitalRead(CLOSE_SWITCH));
 }
 
 void close() {
+  openState = 3;
   int i = 0;
   while(i < 2038/4) {
     nextStep();
     delay(4);
     i++;
   }
+  openState = 0;
 }
-boolean fullyClosed = false;
 void slowClose() {
+  openState = 3;
   boolean touched = false;
   int divisor = 256;
   
   Serial.println("Trying to close");
-  while(!fullyClosed) {
+  while(true) {
     int i = 0;
-    Serial.println("PRIMO CICLO");
+    //Serial.println("PRIMO CICLO");
     while(i < 2038/divisor) {
-      Serial.println("SECONDO CICLO");
+      //Serial.println("SECONDO CICLO");
       nextStep();
       Serial.println(digitalRead(CLOSE_SWITCH));
       if(digitalRead(CLOSE_SWITCH)) { //controllo che l'interrutore sia chiuso (coperchio)
@@ -316,23 +325,25 @@ void slowClose() {
         divisor = 2038;
         break;
       }
-      delay(20);
+      delay(10);
       i++;
     }
     if(touched) {
       Serial.println("TOUCHEDDDD!");
-      fullyClosed = true;
+      openState = 0;
       break;
     }
   }
 }
 void open() {
+  openState = 2;
   int i = 0;
   while(i < 2038/4) {
     previousStep();
     delay(4);
     i++;
   }
+  openState = 1;
 }
 /*void nextSection() {
   int i = 0;
