@@ -1,16 +1,3 @@
-/*
-
-Circuit:
- * LCD RS pin to digital pin 12
- * LCD Enable pin to digital pin 13
- * 
- * LCD R/W pin to ground
- * LCD VSS pin to ground
- * LCD VCC/vdd pin to 5V
- * LCD Anode 10K resistor -> +5v
- * LCD Katode to ground
- * LCD VO pin -> 3kOhm -> +5v
- */
 #define _TASK_PRIORITY
 #define _TASK_SLEEP_ON_IDLE_RUN
 #define _TASK_WDT_IDS
@@ -50,9 +37,11 @@ struct orario
 struct orario orario_apertura = {255,255} ;//per evitare che si apra a mezzanotte dati i valori di default 0 (byte range: 0-255)
 
 int steps_left=MOTOR_STEPS;
-char infoScreen1[17];
-char infoScreen2[17];
-// initialize the library with the numbers of the interface pins
+
+//infomazioni mostrate sul display lcd --> memorizza le informazioni durante le transizioni del coperchio
+char infoScreen1[17]; //16 caratteri prima linea display lcd
+char infoScreen2[17]; //16 caratteri seconda linea display lcd
+
 LiquidCrystal lcd(12, 13, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 SoftwareSerial EEBlue(A0, A1); // RX | TX
 Scheduler r1;
@@ -60,33 +49,45 @@ Scheduler r1;
 int lightDisplay = HIGH;
 int displayStatus = HIGH;
 
+
+//===[Invia informazioni al bluetooth]===//
 void stringToBlue(String str) {
   for (int i = 0; i < str.length(); i++)
   {
     EEBlue.write(str[i]);
   }
 }
+
+//===[Task per spegnere il display]===//
 Task displayOffTask(0, TASK_ONCE, []() {
   digitalWrite(LCD_ANODE,LOW);
   displayStatus = LOW;
 });
+
+//===[Task per reimpostare le informazioni presenti prima delle transizioni]===//
 Task restoreDisplayInfoTask(0,TASK_ONCE, []() {
   lcd.setCursor(0,0);
   lcd.write(infoScreen1);
   lcd.setCursor(0,1);
   lcd.write(infoScreen2);
 });
+
+//===[Task per chiudere il coperchio]===//
 Task closeTask(0, TASK_ONCE, []() {
   //close();
   Serial.println("CLOSE TASK CALLED");
   slowClose();
   restoreInfoScreen();
 });
+
+//===[Task per aprire il coperchio]===//
 Task openTask(0, TASK_ONCE, []() {
   Serial.println("OPEN TASK CALLED");
   open();
   restoreInfoScreen();
 });
+
+
 /*
 STATI APERTURA:
 0 => chiuso
@@ -94,8 +95,10 @@ STATI APERTURA:
 2 => in apertura
 3 => in chiusura
 */
-
 int openState = 0;
+
+
+
 //===[TASK CHE CONTROLLA UNA VOLTA AL MINUTO SE E' L'ORARIO DI APRIRE IL COPERCHIO]===//
 Task checkTimeTask(59000, TASK_FOREVER, []() {
   Serial.println(hour() + ":" + String(minute()) +" == " + orario_apertura.hours + ":" + orario_apertura.minutes);
@@ -184,6 +187,8 @@ void executeCommand() {
     lcd.write(infoScreen2);
   }
 }
+
+//===[Legge se sono disponibili dati dalla seriale del bluetooth, e in tal caso esegue i comandi ricevuti]===//
 Task bluetoothSerialTask(1000, TASK_FOREVER, []() {
   while (EEBlue.available()) { //build command
     char c = EEBlue.read();
@@ -196,9 +201,10 @@ Task bluetoothSerialTask(1000, TASK_FOREVER, []() {
   }
   //if(command.length() > 0) Serial.println(command);
   
-  while (Serial.available()) EEBlue.write(Serial.read());
-  //Serial.println("Ended bluetooth check for data");
+  //while (Serial.available()) EEBlue.write(Serial.read()); //E' possibile inviare i comandi anche da seriale usb nel caso non si abbia a disposizione l'app
 });
+
+//===[funzione chiamata al rilascio del pulsante del display]===//
 long lastTimeBtnDisplayPressed = 0;
 void btnDisplayPressed() {
   //Serial.print("a");
@@ -210,13 +216,15 @@ void btnDisplayPressed() {
     lastTimeBtnDisplayPressed = millis();
   }
 }
-long lastTimeBtnClosePressed = 0;
-void btnClosePressed() {
+
+//===[funzione chiamata al rilascio del pulsante del coperchio]===//
+long lastTimeBtnTogglePressed = 0;
+void btnTogglePressed() {
   Serial.println("BTN CLOSE PRESSED");
   Serial.println(openState);
-  if(millis() - lastTimeBtnClosePressed > 1000) {
+  if(millis() - lastTimeBtnTogglePressed > 1000) {
     Serial.println("executing");
-    lastTimeBtnClosePressed = millis();
+    lastTimeBtnTogglePressed = millis();
     if(openState == 1) {
       lcd.setCursor(0,0);
       lcd.write("    CHIUSURA    ");
@@ -262,8 +270,8 @@ void setup()
   r1.addTask(displayOffTask);
   r1.addTask(bluetoothSerialTask);
   r1.addTask(checkTimeTask);
-  attachInterrupt(digitalPinToInterrupt(DISPLAY_BTN), btnDisplayPressed, FALLING); //WITH FALLING instead of RISING(+ time check) i avoid bouncing effect on release because the interrupt is called only on release and not on press
-  attachInterrupt(digitalPinToInterrupt(CLOSE_BTN), btnClosePressed, FALLING);
+  attachInterrupt(digitalPinToInterrupt(DISPLAY_BTN), btnDisplayPressed, FALLING); //CON FALLING invece che RISING(+ time check) evito effetto bounce sul rilascio perché l'interrupt è chiamato solo al rilascio e non alla pressione
+  attachInterrupt(digitalPinToInterrupt(CLOSE_BTN), btnTogglePressed, FALLING);
   
   lcd.begin(16, 2);
   lcd.setCursor(0,0);
@@ -283,20 +291,10 @@ void setup()
 }
 void loop()
 {
-  //Serial.print(digitalRead(DISPLAY_BTN));
-  /*buttonStatus = digitalRead(7);
-  Serial.print(buttonStatus);
-  if(n == 0) {
-    nextSection();
-    n++;
-  }
-  delay(1000);
-  digitalWrite(LCD_ANODE,lightDisplay);
-  //digitalWrite(LCD_ANODE,buttonStatus);
-  lightDisplay = !lightDisplay;*/
   r1.execute();
 }
 
+//===[sistema di chiusura senza feedback]===//
 void close() {
   openState = 3;
   int i = 0;
@@ -307,6 +305,8 @@ void close() {
   }
   openState = 0;
 }
+
+//===[sistema di chiusura con feedback]===//
 void slowClose() {
   openState = 3;
   boolean touched = false;
@@ -345,14 +345,6 @@ void open() {
   }
   openState = 1;
 }
-/*void nextSection() {
-  int i = 0;
-  while(i < 2038/NSECTION) {
-    nextStep();
-    delay(2);
-    i++;
-  }
-}*/
 void goToStep() {
   switch(Steps){
        case 0:
