@@ -29,9 +29,12 @@ All'esterno della scatola si trova:
 * Un fine corsa (composto da materiale conduttore) che funziona come interruttore permettendo al sistema di avere un segnale di feedback nel momento in cui il coperchio è chiuso completamente.
 
 ### Immagine Scatola
-[![Scatola]()]
+[![Scatola](https://github.com/Demacri/Programmable-pets-feeder/blob/main/img/scatola_davanti.jpg?raw_true)]
 ### Screenshot App (in funzione)
-[![Screenshot App]()]
+[![Screenshot App](https://github.com/Demacri/Programmable-pets-feeder/blob/main/img/screenshot_app.jpg?raw=true)]
+
+_Altre immagini si trovano nella directory /img_
+
 ## Funzionamento
 L'alimentazione al sistema è fornita tramite cavo usb(che esce dalla scatola), appositamente tagliato e collegato direttamente ai 5V di Arduino(**saltando così le protezioni interne di quest'ultimo, bisogna assicurarsi che la tensione sia corretta sui 5V**). Appena il circuito viene alimentato il sistema è funzionante, il display rimane acceso per 15secondi mostrando la scritta "Pross. Apertura \ Not Set", dopodiché si spegnerà. Il bottone più a destra della scatola permette di accendere e spegnere il display. Per riempire la ciotola basterà premere il bottone più a sinistra che aprirà il coperchio, mostrerà l'informazione di apertura sul display e permetterà l'aggiunta dei croccantini nella ciotola. Una volta riempita la ciotola, ripremendo il bottone, inizierà la chiusura del coperchio che terminerà nel momento in cui la piastra metallica laterale del coperchio toccando con la piastra di finecorsa sulla scatola chiuderà un semplicissimo circuito "informando" l'arduino dell'avvenuta chiusura.
 
