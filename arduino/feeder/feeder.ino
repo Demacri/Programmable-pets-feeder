@@ -208,7 +208,7 @@ Task bluetoothSerialTask(1000, TASK_FOREVER, []() {
 long lastTimeBtnDisplayPressed = 0;
 void btnDisplayPressed() {
   //Serial.print("a");
-  if(millis() - lastTimeBtnDisplayPressed > 100) {
+  if(millis() - lastTimeBtnDisplayPressed > 1000) {
     displayStatus = !displayStatus;
     digitalWrite(LCD_ANODE,displayStatus);
     displayOffTask.disable();
